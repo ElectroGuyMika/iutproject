@@ -1,0 +1,209 @@
+ /*================================================================================================================================================================
+******************************************************************************************************************************************************************
+                               PROJET IOT : ENVOI NUMERO D'IDENTIFICATION DE TAG PASSIF SUR LE RESEAU - NodeMCU ESP8266 1.0 - MFRC522
+******************************************************************************************************************************************************************
+  =================================================================================================================================================================*/
+
+/*=====================================
+              INITIALISATION
+  ======================================*/
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <WiFiClient.h>
+#include <MFRC522.h>
+#define RST_PIN 0 // La PIN Reset du module RC522 est connectée au port GPIO 0 (D3, sur le NodeMCU)du NodeMcu ESP8266 1.0
+#define SS_PIN 2 // La PIN SS du module RC522 (ChipSelect) est connectée au port GPIO 2 (D4, sur le NodeMCU) du NodeMcu ESP8266 1.0
+MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance ??
+const char* ssid = "Projet_IOT";    /*SSID*/
+const char* password = "123456789"; /*Mot de passe*/
+const char* acces = "";//Contient une information sur l'accès autorisé ou non du TAG
+String uid_tag = ""; /*Contient l'UID du TAG (format STRING)*/
+String uid_server = "";// Contient l'UID qui est envoyé au serveur (format STRING)
+String uid_autorise; /*Contient l'UID de TAG autorisé (format STRING)*/
+int ledVerte = 16; // Remplace la commande de la gache dévérouillée 
+int ledRouge = 15; /*Remplace la commande de l'écran LCD*/
+int ledOrange = 10; /*Remplace la commande de l'écran LCD*/
+int gache;
+ESP8266WebServer server(80); // Server sur le port 80
+
+/*==========================================
+                    SETUP
+============================================*/
+void setup() 
+{
+  pinMode(ledVerte,OUTPUT);
+  pinMode(ledRouge,OUTPUT);
+  pinMode(ledOrange,OUTPUT);
+  
+  Serial.begin(115200); // Initialisation communication avec le moniteur série 
+  SPI.begin();          // Initialisation bus SPI
+  mfrc522.PCD_Init();   // Initialisation MFRC522
+  WiFi.begin (ssid, password);
+ 
+  //Attente de la connection au réseau Wifi 
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, password);
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print("Adresse IP :");
+  Serial.println (myIP); // Affichage Adresse IP sur le sérial Monitor 
+  
+   //On branche la fonction qui gère la première page 
+  server.on ("/", handleRoot); 
+
+  server.begin ();
+  Serial.println ("HTTP Server commence");  
+  
+}
+
+/*==========================================
+                    LOOP
+============================================*/
+void loop() 
+{
+  digitalWrite(ledVerte,LOW);
+  digitalWrite(ledRouge,LOW);
+  digitalWrite(ledOrange,LOW);
+  
+  uid_tag="";//On vide cette variable afin d'obtenir 
+  
+   server.handleClient(); // Vérifie la présence d'un client et renvoi à celui la page HTML demandé
+
+  if (!mfrc522.PICC_IsNewCardPresent ()) //Vérifie la présence du TAG sur le lecteur RFID
+  {
+    delay(50);
+    return;
+  }
+
+  if(!mfrc522.PICC_ReadCardSerial())//Lecture du TAG
+  {
+    delay(50);
+    return;  //Permet de revenir au début de la condition
+  } 
+     
+  Serial.print (F("Numero d'identification : "));
+  conversion (mfrc522.uid.uidByte, mfrc522.uid.size); //On affiche l'UID sur le sérial monitor
+  Serial.println();
+
+  handleRoot(); //Appel fonction qui envois des infos au serveur 
+ 
+  systeme_gache(); //Appel la fonction systeme_gache
+  
+}
+
+/*==========================================
+                handleRoot
+============================================*/
+void handleRoot() // Fonction qui permet d'envoyer au serveur les informations souhaitées 
+{
+  if (uid_tag==0) // aucune cartes n'a été lu
+   {
+     /*Mettre l'instruction LCD "Check the TAG"*/
+     server.send(200, "text/html", pageWeb());  
+     
+   }
+  else //Commence dès la première lecture d'un TAG 
+   {
+     uid_test(); // On teste si le TAG est fait parti de ceux autorisé
+     server.send(200, "text/html", pageWeb()); // "text/html" : pour afficher du code en format HTML
+   }
+}
+
+
+/*==========================================
+         TEST numéro d'identfication
+============================================*/
+void uid_test () 
+{
+   // L'UID authorisé est : fd76be29
+   uid_autorise=String("fd76be29");  //uid_autorise prend la valeur "fd76be29" (qui a été convertit en string)
+      
+   if (uid_tag == uid_autorise) // Si le TAG est le même que celui authorisé 
+    {
+       acces = " Acces autorise ! ";
+       uid_server = "Bienvenue M. le prof";
+       digitalWrite(ledVerte,HIGH);
+       gache=1;      //Lorsque gache vaut 1 la LED verte s'allumme (cf, la fonction systeme_gache)    
+    }
+   else //Sinon, si le TAG n'est pas le même que celui autorisé
+    {
+       acces = "Acces refuse ! ";
+       uid_server = "Veuillez contacter l'administration" ;
+       digitalWrite(ledRouge,HIGH);
+       gache=2;//Lorsque gache vaut 2 la LED verte ne s'alumme pas (cf, la fonction systeme_gache)       
+    }   
+}
+
+/*==========================================
+          Système de la gache
+============================================*/
+void systeme_gache () //Fonction qui simule les instructions de la gache
+{      
+  if (gache==1)                                                              
+   {
+    digitalWrite(ledOrange,1);
+    delay(2000);
+    digitalWrite(ledVerte,0);
+    digitalWrite(ledOrange,0);
+    
+    gache=0; //Pour sortir de la boucle
+   } 
+   else(gache==2);
+   {
+     delay(2000);   
+   }    
+}
+
+
+
+/*==========================================
+                pageWEB
+============================================*/
+String pageWeb ()
+{
+  String page = "<!DOCTYPE html> <html><head><meta http-equiv=\"refresh\" content=\"1\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"></head>";
+  page += "<HEAD><TITLE>PROJET IOT</TITLE>";
+  page += "<body> <h1>PROJET IOT : </h1>" ; //Titre
+  page += acces;
+  page += uid_server;
+  page += "</body></html>";
+  return page;
+}
+
+
+
+
+/*==========================================
+            Conversion UID TAG
+============================================*/
+void conversion(byte *buffer, byte bufferSize)
+{
+  uid_tag = ""; //uid_tag se vide de tout contenu !
+  
+   for (byte i=0; i<bufferSize; i++)
+   {
+    Serial.print(buffer[i]<0x10 ? "0" : " ");
+    Serial.print(buffer[i], HEX);
+    uid_tag +=String(mfrc522.uid.uidByte[i]<0x10 ? "0" : "");
+    uid_tag +=String(mfrc522.uid.uidByte[i], HEX); //uid_tag prend l'UID du TAG en format Hexadécimal
+   }
+}
+
+
+
+
+/*==========================================
+            systeme LCD
+============================================
+void systeme_lcd () //Fonction qui simule les instruction du lecteur LCD
+{      
+  if (uid_tag=="")
+   {
+    digitalWrite(ledRouge,LOW);
+    digitalWrite(ledOrange,HIGH); // Simule l'envoi de l'instruction "Passez votre carte" sur l'écran LCD
+   } 
+  else
+  {
+  digitalWrite(ledOrange,LOW);
+  digitalWrite(ledRouge,HIGH); // Simule l'envoi de l'instruction "Acces autorisé ou non autorisé" sur l'écran LCD 
+  }
+}*/
